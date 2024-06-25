@@ -1,20 +1,12 @@
-import time
-from pathlib import Path
-
-FILE_PATH = Path(__file__).parent.parent / "measurements.txt"
+import sys
 
 
-def process_metrics():
+def process_metrics(path: str):
     metrics: dict[bytes, tuple[int, float, float, float]] = {}
 
-    with open(FILE_PATH, "rb") as f:
-        while line := f.readline().strip():
-            # if line[-6] == b";":
-            #     # Case
-            #     val = int(line[-1])
-
+    with open(path, "rb") as f:
+        while line := f.readline().rstrip(b"\n"):
             city, value = line.split(b";")
-
             value = float(value)
 
             if city not in metrics:
@@ -33,11 +25,8 @@ def process_metrics():
 
 
 if __name__ == "__main__":
-    start = time.time()
-    output = dict(sorted(process_metrics().items()))
+    path = sys.argv[1]
+    output = dict(sorted(process_metrics(path).items()))
 
     for city, (n, sum, min_val, max_val) in output.items():
         print(f"{city.decode()}={min_val:.1f}/{sum/n:.1f}/{max_val:.1f}")
-
-    end = time.time()
-    print(f"Time taken: {end - start:.1f}s")
