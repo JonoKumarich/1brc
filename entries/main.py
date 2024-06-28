@@ -4,19 +4,34 @@ import os
 
 FILE_PATH = "./measurements.txt"
 CPU_COUNT = cpus if (cpus := os.cpu_count()) else 1
-# CPU_COUNT = 1
 FILE_SIZE = os.stat(FILE_PATH).st_size
 CHUNK_SIZE = FILE_SIZE // CPU_COUNT
 
 
-def calculate_metrics(path: str, start: int, end: int):
-    metrics: dict[bytes, tuple[int, float, float, float]] = {}
+def _get_mmap_granularity_bounds(start: int, end: int) -> tuple[int, int]:
+    gran = mmap.ALLOCATIONGRANULARITY
 
-    with open(path, "rb") as f:
-        f.seek(start)
-        while line := f.readline().rstrip(b"\n"):
-            city, value = line.split(b";")
-            value = float(value)
+    lower = (start // gran) * gran
+    upper = ((end // gran) + 1) * gran
+    return lower, upper
+
+
+def calculate_metrics(path: str, start: int, end: int):
+    metrics: dict[bytes, tuple[int, int, float, float]] = {}
+    gran_start, _ = _get_mmap_granularity_bounds(start, end)
+
+    with mmap.mmap(
+        fileno=os.open(path, os.O_RDONLY),
+        length=end - gran_start,
+        offset=gran_start,
+        access=mmap.ACCESS_READ,
+    ) as f:
+        f.seek(start - gran_start)
+        while line := f.readline():
+            sep = line.find(59)
+
+            city = line[:sep]
+            value = int(line[sep + 1 : -3] + line[-2:-1])
 
             if city not in metrics:
                 metrics[city] = (1, value, value, value)
@@ -33,15 +48,14 @@ def calculate_metrics(path: str, start: int, end: int):
             if f.tell() >= end - 1:
                 return metrics
 
-    # ERROR: We are returning here for some reason
-    assert False, f"We should have returned earlier {start}, {end}"
+    return metrics
 
 
-def print_metrics(metrics: dict[bytes, tuple[int, float, float, float]]):
+def print_metrics(metrics: dict[bytes, tuple[int, int, float, float]]):
     output = dict(sorted(metrics.items()))
 
     for city, (n, sum, min_val, max_val) in output.items():
-        print(f"{city.decode()}={min_val:.1f}/{sum/n:.1f}/{max_val:.1f}")
+        print(f"{city.decode()}={min_val/10:.1f}/{sum/(n*10):.1f}/{max_val/10:.1f}")
 
 
 def get_chunk_args(file: mmap.mmap) -> list[tuple[str, int, int]]:
@@ -60,8 +74,8 @@ def get_chunk_args(file: mmap.mmap) -> list[tuple[str, int, int]]:
 
 
 def merge_results(
-    results: list[dict[bytes, tuple[int, float, float, float]]],
-) -> dict[bytes, tuple[int, float, float, float]]:
+    results: list[dict[bytes, tuple[int, int, float, float]]],
+) -> dict[bytes, tuple[int, int, float, float]]:
     merged = {}
     for result in results:
         for city, (n, sum, min_val, max_val) in result.items():
